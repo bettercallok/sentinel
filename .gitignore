@@ -1,0 +1,17 @@
+# Python/Django
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database
+db.sqlite3
+
+# Media files (User uploads)
+media/
+
+# Virtual Environment
+venv/
+env/
+
+# Environment variables
+.env

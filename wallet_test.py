@@ -2,7 +2,7 @@ import requests
 import base58
 from nacl.signing import SigningKey
 
-print("--- 🛡️ Sentinel Wallet Simulator 🛡️ ---")
+print("---  Sentinel Wallet Simulator  ---")
 
 # 1. Generate a fake Phantom Wallet keypair
 print("\n1. Generating fake Solana Keypair...")

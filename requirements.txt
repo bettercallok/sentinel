@@ -6,3 +6,5 @@ solana
 PyNaCl 
 dj-database-url
 base58
+PyJWT>=2.8.0
+requests>=2.31.0

@@ -6,6 +6,8 @@ const API = {
   nonce:  '/api/auth/nonce/',
   verify: '/api/auth/verify/',
   upload: '/api/vault/upload/',
+  files:  '/api/vault/files/',
+  download: '/api/vault/download/',
 };
 
 // ─── CryptoUtils (AES-256-GCM) ────────────
@@ -33,6 +35,26 @@ const CryptoUtils = {
     let binary = '';
     bytes.forEach(b => binary += String.fromCharCode(b));
     return btoa(binary);
+  },
+
+  /**
+   * Import a base64 string back into a CryptoKey for decryption.
+   * @param {string} base64Key 
+   * @returns {Promise<CryptoKey>}
+   */
+  async importKeyFromBase64(base64Key) {
+    const binary = atob(base64Key);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return window.crypto.subtle.importKey(
+      'raw',
+      bytes.buffer,
+      'AES-GCM',
+      true,
+      ['encrypt', 'decrypt']
+    );
   },
 
   /**
@@ -66,6 +88,30 @@ const CryptoUtils = {
 
     return { encryptedBlob, exportedKey };
   },
+
+  /**
+   * Decrypts an encrypted blob using the provided base64 key.
+   * @param {Blob} encryptedBlob 
+   * @param {string} base64Key 
+   * @returns {Promise<Blob>}
+   */
+  async decryptFile(encryptedBlob, base64Key) {
+    const key = await this.importKeyFromBase64(base64Key);
+    const buffer = await encryptedBlob.arrayBuffer();
+
+    // Extract the 12-byte IV from the front
+    const iv = buffer.slice(0, 12);
+    const ciphertext = buffer.slice(12);
+
+    // Decrypt
+    const decryptedBuffer = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: new Uint8Array(iv) },
+      key,
+      ciphertext
+    );
+
+    return new Blob([decryptedBuffer]);
+  }
 };
 
 // ─── State ─────────────────────────────────
@@ -75,6 +121,8 @@ let state = {
   selectedFile: null,
   lastEncryptionKey: null,  // base64 key from the last upload
 };
+
+let pendingDownload = null;
 
 // ─── Screen Navigation ────────────────────
 function showScreen(screenId) {
@@ -95,6 +143,7 @@ function goToDashboard() {
   const keyDisplay = document.getElementById('encryptionKeyDisplay');
   if (keyDisplay) keyDisplay.style.display = 'none';
   showScreen('screenDashboard');
+  loadVaultFiles(); // Refresh vault list
 }
 
 // ─── Wallet Utils ──────────────────────────
@@ -122,8 +171,10 @@ function updateWalletUI() {
 async function connectWallet() {
   const connectBtn = document.getElementById('connectBtn');
 
-  // Check for Phantom
-  if (!window.solana || !window.solana.isPhantom) {
+  // Modern check for Phantom
+  const provider = window.phantom?.solana || window.solana;
+
+  if (!provider || !provider.isPhantom) {
     showToast('Phantom wallet not found. Please install Phantom.', 'error');
     window.open('https://phantom.app/', '_blank');
     return;
@@ -132,8 +183,8 @@ async function connectWallet() {
   try {
     setButtonLoading(connectBtn, true);
 
-    // 1. Connect to Phantom
-    const resp = await window.solana.connect();
+    // 1. Connect to Phantom using the modern provider
+    const resp = await provider.connect();
     const walletAddress = resp.publicKey.toString();
 
     // 2. Request nonce from backend
@@ -148,7 +199,7 @@ async function connectWallet() {
 
     // 3. Sign the nonce with Phantom
     const message = new TextEncoder().encode(nonceData.nonce);
-    const signedMessage = await window.solana.signMessage(message, 'utf8');
+    const signedMessage = await provider.signMessage(message, 'utf8');
 
     // 4. Verify signature on backend
     const verifyResp = await fetch(API.verify, {
@@ -160,7 +211,11 @@ async function connectWallet() {
       }),
     });
 
-    if (!verifyResp.ok) throw new Error('Signature verification failed');
+    const verifyData = await verifyResp.json();
+    if (!verifyResp.ok) throw new Error(verifyData.error || 'Signature verification failed');
+
+    // NEW: Save the JWT securely in memory/localStorage
+    localStorage.setItem('sentinel_token', verifyData.token);
 
     // 5. Success — update state
     state.walletAddress = walletAddress;
@@ -168,6 +223,7 @@ async function connectWallet() {
     updateWalletUI();
     showScreen('screenDashboard');
     showToast('Wallet connected successfully', 'success');
+    loadVaultFiles(); // Fetch files for this wallet
 
   } catch (err) {
     console.error('Wallet connection error:', err);
@@ -180,9 +236,13 @@ async function connectWallet() {
 }
 
 function disconnectWallet() {
-  if (window.solana) {
-    window.solana.disconnect();
+  const provider = window.phantom?.solana || window.solana;
+  if (provider) {
+    provider.disconnect();
   }
+  
+  localStorage.removeItem('sentinel_token'); // NEW: Clear JWT session
+  
   state.walletAddress = null;
   state.connected = false;
   state.lastEncryptionKey = null;
@@ -198,6 +258,106 @@ function devConnect() {
   updateWalletUI();
   showScreen('screenDashboard');
   showToast('Dev mode — connected as ' + truncateAddress(state.walletAddress), 'success');
+  loadVaultFiles(); // Fetch files for the dev wallet
+}
+
+// ─── Vault File Listing & Decryption ───────
+async function loadVaultFiles() {
+  if (!state.walletAddress) return;
+  
+  const container = document.getElementById('vaultFilesBody');
+  if(!container) return;
+  
+  try {
+    container.innerHTML = '<tr><td colspan="4" style="text-align:center;">Loading vault contents...</td></tr>';
+    
+    const resp = await fetch(`${API.files}?wallet=${state.walletAddress}`);
+    if (!resp.ok) throw new Error('Failed to load files');
+    
+    const files = await resp.json();
+    
+    if (files.length === 0) {
+      container.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--gray-3);">No documents in your vault yet.</td></tr>';
+      return;
+    }
+
+    container.innerHTML = files.map(file => `
+      <tr>
+        <td>${escapeHtml(file.file_name)}</td>
+        <td class="mono-text">${truncateAddress(file.required_nft_address)}</td>
+        <td>${new Date(file.uploaded_at).toLocaleDateString()}</td>
+        <td>
+          <button class="btn-ghost" onclick="promptDownload(${file.id}, '${escapeHtml(file.file_name)}')">Download</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error('Error loading vault files:', err);
+    container.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--gray-3);">Error loading your vault.</td></tr>';
+  }
+}
+
+function promptDownload(fileId, fileName) {
+  pendingDownload = { fileId, fileName };
+  document.getElementById('keyPromptModal').classList.add('active');
+  document.getElementById('decryptionKeyInput').value = '';
+}
+
+function closeKeyModal() {
+  document.getElementById('keyPromptModal').classList.remove('active');
+  pendingDownload = null;
+}
+
+async function confirmDownload() {
+  const keyInput = document.getElementById('decryptionKeyInput').value.trim();
+  if (!keyInput || !pendingDownload) {
+    showToast('Encryption key is required', 'error');
+    return;
+  }
+
+  const { fileId, fileName } = pendingDownload;
+  closeKeyModal();
+
+  try {
+    showToast(`Retrieving encrypted blob...`, 'info');
+    
+    // NEW: Get the token and add it to the request headers
+    const token = localStorage.getItem('sentinel_token');
+    
+    // 1. Fetch encrypted blob from the backend
+    const resp = await fetch(`${API.download}${fileId}/`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!resp.ok) {
+      // Parse error JSON from backend if access is denied
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.error || 'Failed to download document. Unauthorized.');
+    }
+    const encryptedBlob = await resp.blob();
+
+    // 2. Decrypt locally
+    showToast('Decrypting document locally...', 'info');
+    const decryptedBlob = await CryptoUtils.decryptFile(encryptedBlob, keyInput);
+
+    // 3. Trigger Browser Download
+    const url = URL.createObjectURL(decryptedBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName; // Restores original filename, dropping the .enc backend appends
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast('Decryption successful!', 'success');
+
+  } catch (err) {
+    console.error('Decryption error:', err);
+    showToast(`Decryption failed: ${err.message}`, 'error');
+  }
 }
 
 // ─── File Handling ─────────────────────────

@@ -1,6 +1,9 @@
 import base58
 import nacl.signing
 import nacl.exceptions
+import jwt
+import datetime
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -48,8 +51,20 @@ class VerifySignatureView(APIView):
             # 5. Security: Destroy the nonce so it can never be used again
             wallet_nonce.delete()
 
-            # 6. Success! 
-            return Response({'status': 'success', 'message': 'Authentication successful!'})
+            # 6. Generate JWT Session Token (Expires in 24 hours)
+            payload = {
+                'wallet_address': wallet_address,
+                'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24),
+                'iat': datetime.datetime.now(datetime.timezone.utc)
+            }
+            token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+
+            # 7. Success! Return the token to the frontend
+            return Response({
+                'status': 'success', 
+                'message': 'Authentication successful!',
+                'token': token  
+            })
 
         except WalletNonce.DoesNotExist:
             return Response({'error': 'No login challenge found. Request a new nonce.'}, status=status.HTTP_404_NOT_FOUND)

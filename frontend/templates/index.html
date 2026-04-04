@@ -11,15 +11,11 @@
 </head>
 <body>
 
-  <!-- Ambient Background -->
   <div class="bg-grid"></div>
   <div class="bg-glow"></div>
 
   <div class="app-container">
 
-    <!-- ════════════════════════════════════════
-         Navbar
-         ════════════════════════════════════════ -->
     <nav class="navbar" id="navbar">
       <a href="/" class="navbar-logo">
         <div class="logo-icon">S</div>
@@ -36,9 +32,6 @@
       </div>
     </nav>
 
-    <!-- ════════════════════════════════════════
-         Screen 1 — Landing / Connect
-         ════════════════════════════════════════ -->
     <section class="screen active" id="screenLanding">
       <div class="landing-content">
         <div class="landing-eyebrow">
@@ -66,9 +59,6 @@
       </div>
     </section>
 
-    <!-- ════════════════════════════════════════
-         Screen 2 — Vault Dashboard
-         ════════════════════════════════════════ -->
     <section class="screen" id="screenDashboard">
       <div class="dashboard-content">
 
@@ -77,7 +67,6 @@
           <p class="dashboard-subtext">Upload encrypted documents and gate access behind your NFT.</p>
         </div>
 
-        <!-- Stats -->
         <div class="stats-row">
           <div class="stat-card">
             <div class="stat-label">Status</div>
@@ -93,13 +82,11 @@
           </div>
         </div>
 
-        <!-- Upload Section -->
         <div class="upload-section">
           <h3 class="upload-section-title">Upload Document</h3>
           <p class="upload-section-desc">Select an encrypted file and specify the NFT address required for access.</p>
 
           <form id="uploadForm" onsubmit="uploadFile(event)">
-            <!-- Drop Zone -->
             <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
               <div class="drop-zone-icon">📁</div>
               <p class="drop-zone-text">Drop your file here, or <strong style="color:var(--white);">browse</strong></p>
@@ -116,7 +103,6 @@
               </div>
             </div>
 
-            <!-- NFT Address -->
             <div class="form-group">
               <label class="form-label" for="nftAddress">Required NFT Address</label>
               <input
@@ -130,7 +116,6 @@
               <p class="form-hint">Only wallets holding this NFT will be able to access the file.</p>
             </div>
 
-            <!-- Actions -->
             <div class="form-actions">
               <button type="submit" class="btn btn-primary" id="uploadBtn">
                 <span class="btn-shine"></span>
@@ -141,12 +126,30 @@
             </div>
           </form>
         </div>
+
+        <div class="upload-section" style="margin-top: 2rem;">
+          <h3 class="upload-section-title">Your Vault</h3>
+          <p class="upload-section-desc">Documents uploaded by your wallet address.</p>
+          
+          <div class="table-container">
+            <table class="vault-table">
+              <thead>
+                <tr>
+                  <th>File Name</th>
+                  <th>NFT Gate</th>
+                  <th>Date</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="vaultFilesBody">
+                </tbody>
+            </table>
+          </div>
+        </div>
+        
       </div>
     </section>
 
-    <!-- ════════════════════════════════════════
-         Screen 3 — Success
-         ════════════════════════════════════════ -->
     <section class="screen" id="screenSuccess">
       <div class="success-content">
         <div class="success-icon">🛡</div>
@@ -157,10 +160,8 @@
         </p>
 
         <div class="success-details" id="successDetails">
-          <!-- Populated by JS -->
-        </div>
+          </div>
 
-        <!-- Encryption Key Display -->
         <div class="encryption-key-display" id="encryptionKeyDisplay" style="display:none;">
           <div class="key-warning">⚠️ Save this key — it cannot be recovered!</div>
           <div class="key-row">
@@ -179,9 +180,6 @@
       </div>
     </section>
 
-    <!-- ════════════════════════════════════════
-         Footer
-         ════════════════════════════════════════ -->
     <footer class="footer">
       <span>SENTINEL v1.0</span>
       <span>Built on Solana</span>
@@ -189,7 +187,20 @@
 
   </div>
 
-  <!-- Toast Container -->
+  <div class="modal-overlay" id="keyPromptModal">
+    <div class="modal-content">
+      <h3 class="upload-section-title" style="margin-bottom: 0.5rem;">Unlock Document</h3>
+      <p class="form-hint" style="margin-bottom: 1.5rem;">Enter the AES-256 base64 key generated during upload.</p>
+      
+      <input type="text" class="form-input" id="decryptionKeyInput" placeholder="Paste encryption key here..." autocomplete="off" />
+      
+      <div class="form-actions" style="margin-top: 1.5rem; justify-content: flex-end;">
+        <button class="btn btn-ghost" onclick="closeKeyModal()">Cancel</button>
+        <button class="btn btn-primary" id="decryptBtn" onclick="confirmDownload()">Decrypt & Download</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
 
   <script src="{% static 'app.js' %}"></script>

@@ -3,6 +3,7 @@ import nacl.signing
 import nacl.exceptions
 import jwt
 import datetime
+from django.utils import timezone
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -36,6 +37,13 @@ class VerifySignatureView(APIView):
         try:
             # 1. Fetch the exact challenge we issued to this wallet
             wallet_nonce = WalletNonce.objects.get(wallet_address=wallet_address)
+            
+            # Check if nonce is expired (older than 5 minutes)
+            nonce_age = timezone.now() - wallet_nonce.created_at
+            if nonce_age > datetime.timedelta(minutes=5):
+                wallet_nonce.delete()
+                return Response({'error': 'Nonce expired. Request a new one.'}, status=status.HTTP_401_UNAUTHORIZED)
+                
             message = str(wallet_nonce.nonce).encode('utf-8')
 
             # 2. Decode the Solana Public Key

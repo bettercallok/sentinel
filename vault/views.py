@@ -27,7 +27,7 @@ def check_nft_ownership(wallet_address, nft_mint_address):
     }
     
     try:
-        resp = requests.post(url, json=payload, headers=headers).json()
+        resp = requests.post(url, json=payload, headers=headers, timeout=5).json()
         accounts = resp.get('result', {}).get('value', [])
         
         # Check if any account holding this mint has a balance > 0
@@ -58,6 +58,10 @@ class FileUploadView(APIView):
             return Response({'error': 'Session expired. Please reconnect wallet.'}, status=status.HTTP_401_UNAUTHORIZED)
         except jwt.InvalidTokenError:
             return Response({'error': 'Invalid token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        file_obj = request.FILES.get('encrypted_file')
+        if file_obj and file_obj.size > 50 * 1024 * 1024:
+            return Response({'error': 'File too large. Maximum size is 50MB.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Override uploader_wallet with trusted value from JWT
         data = request.data.copy()

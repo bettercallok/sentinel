@@ -9,3 +9,4 @@ base58
 PyJWT>=2.8.0
 requests>=2.31.0
 whitenoise>=6.5.0
+gunicorn>=21.2.0

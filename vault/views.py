@@ -46,7 +46,23 @@ class FileUploadView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, *args, **kwargs):
-        serializer = EncryptedDocumentSerializer(data=request.data)
+        # JWT Authentication
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Unauthorized. Missing token.'}, status=status.HTTP_401_UNAUTHORIZED)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+            uploader_wallet = payload['wallet_address']
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Session expired. Please reconnect wallet.'}, status=status.HTTP_401_UNAUTHORIZED)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Override uploader_wallet with trusted value from JWT
+        data = request.data.copy()
+        data['uploader_wallet'] = uploader_wallet
+        serializer = EncryptedDocumentSerializer(data=data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -57,12 +73,18 @@ class FileListView(APIView):
     """List all encrypted documents uploaded by a specific wallet."""
 
     def get(self, request):
-        wallet = request.query_params.get('wallet')
-        if not wallet:
-            return Response(
-                {'error': 'wallet query parameter is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # JWT Authentication
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return Response({'error': 'Unauthorized. Missing token.'}, status=status.HTTP_401_UNAUTHORIZED)
+        token = auth_header.split(' ')[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+            wallet = payload['wallet_address']
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Session expired. Please reconnect wallet.'}, status=status.HTTP_401_UNAUTHORIZED)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid token.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         documents = EncryptedDocument.objects.filter(
             uploader_wallet=wallet

@@ -271,7 +271,12 @@ async function loadVaultFiles() {
   try {
     container.innerHTML = '<tr><td colspan="4" style="text-align:center;">Loading vault contents...</td></tr>';
     
-    const resp = await fetch(`${API.files}?wallet=${state.walletAddress}`);
+    const token = localStorage.getItem('sentinel_token');
+    const resp = await fetch(`${API.files}?wallet=${state.walletAddress}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
     if (!resp.ok) throw new Error('Failed to load files');
     
     const files = await resp.json();
@@ -448,8 +453,12 @@ async function uploadFile(e) {
     formData.append('encrypted_file', encryptedBlob, state.selectedFile.name + '.enc');
     formData.append('required_nft_address', nftAddress);
 
+    const token = localStorage.getItem('sentinel_token');
     const resp = await fetch(API.upload, {
       method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
       body: formData,
     });
 

@@ -15,3 +15,9 @@ env/
 
 # Environment variables
 .env
+
+# MacOS
+.DS_Store
+
+# Django Static
+staticfiles/

@@ -7,7 +7,7 @@ interface LandingScreenProps {
 }
 
 export function LandingScreen({ onConnected }: LandingScreenProps) {
-  const { connect, devConnect } = useAuth();
+  const { connect } = useAuth();
   const { showToast } = useToast();
   const [loading, setLoading] = useState(false);
 
@@ -30,12 +30,6 @@ export function LandingScreen({ onConnected }: LandingScreenProps) {
       setLoading(false);
     }
   }, [connect, showToast, onConnected]);
-
-  const handleDevConnect = useCallback(() => {
-    devConnect();
-    showToast('Dev mode — connected with test wallet', 'success');
-    onConnected();
-  }, [devConnect, showToast, onConnected]);
 
   return (
     <section className="screen active" id="screenLanding">
@@ -85,15 +79,8 @@ export function LandingScreen({ onConnected }: LandingScreenProps) {
             </>
           )}
         </button>
-
-        <button
-          className="btn btn-ghost"
-          onClick={handleDevConnect}
-          style={{ marginTop: '0.75rem', fontSize: '0.85rem', opacity: 0.6 }}
-        >
-          🔧 Dev Mode (No Wallet)
-        </button>
       </div>
     </section>
   );
 }
+

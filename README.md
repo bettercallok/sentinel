@@ -1,80 +1,91 @@
-# Sentinel
+# sentinel
 
-Sentinel is a Web3-enabled Django application featuring Solana wallet authentication and a token-gated file vault. Users can authenticate using their Solana wallets (like Phantom) via a challenge-response signature mechanism. Once authenticated, users can upload files and restrict downloads to holders of specific Solana NFTs.
+sentinel is a web3-enabled application featuring a react + typescript frontend and a django rest api backend. the system supports solana wallet authentication and a token-gated encrypted file vault. users can authenticate using their solana wallets (like phantom) via a challenge-response signature mechanism. once authenticated, users can upload files and restrict downloads to holders of specific solana nfts.
 
-## Features
+## features
 
-- **Solana Wallet Authentication**: Secure login without passwords. The backend generates a challenge nonce which is signed by the user's wallet. The signature is verified using PyNaCl and base58.
-- **Token-Gated File Vault**: Upload encrypted documents and lock them behind NFT ownership.
-- **On-Chain Verification**: Queries the Solana mainnet RPC to check if a downloader's wallet holds the required NFT mint before serving the file.
-- **JWT Session Management**: Issues a secure, short-lived JSON Web Token after successful wallet verification.
+- **solana wallet authentication**: secure login without passwords. the backend generates a challenge nonce which is signed by the user's wallet. the signature is verified using PyNaCl and base58.
+- **token-gated file vault**: upload encrypted documents and lock them behind NFT ownership.
+- **on-chain verification**: queries the Solana mainnet RPC to check if a downloader's wallet holds the required NFT mint before serving the file.
+- **jwt session management**: issues a secure, short-lived JSON Web Token after successful wallet verification.
 
-## Prerequisites
+## setup instructions
 
-- Docker and Docker Compose (recommended)
-- OR Python 3.11+, PostgreSQL
+### using docker (recommended for backend and database)
 
-## Setup Instructions
-
-### Using Docker (Recommended)
-
-1. Clone the repository.
-2. Build and run the containers using Docker Compose:
+1. clone the repository.
+2. run the docker containers using docker-compose:
    ```bash
    docker-compose up --build
    ```
-3. The application will be available at http://localhost:8000.
+3. the backend api will be available at http://localhost:8000.
 
-### Local Development (Without Docker)
+### frontend setup (react + typescript + vite)
 
-1. Clone the repository and navigate into it.
-2. Create and activate a virtual environment:
+1. navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. install the dependencies:
+   ```bash
+   npm install
+   ```
+3. start the vite dev server:
+   ```bash
+   npm run dev
+   ```
+4. the frontend will be available at http://localhost:5173. it automatically proxies api requests to the django backend on port 8000.
+
+### local backend development (without docker)
+
+1. navigate to the root directory.
+2. create and activate a virtual environment:
    ```bash
    python -m venv venv
-   source venv/bin/activate  # On Windows use: venv\Scripts\activate
+   source venv/bin/activate  # on windows use: venv\Scripts\activate
    ```
-3. Install the dependencies:
+3. install the dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-4. Run database migrations:
+4. run database migrations:
    ```bash
    python manage.py migrate
    ```
-5. Start the Django development server:
+5. start the django development server:
    ```bash
    python manage.py runserver
    ```
 
-## Project Structure
+## project structure
 
-- `core/`: Django project settings, configuration, and root URL routing.
-- `authentication/`: Django app managing wallet login, nonces, signature verification, and JWT generation.
-- `vault/`: Django app handling file uploads, retrieving lists of files, and verifying NFT ownership for token-gated downloads.
-- `frontend/`: Vanilla HTML, CSS, and JavaScript interface demonstrating integration with the Phantom Wallet provider.
+- `core/`: django project settings, configuration, and root URL routing.
+- `authentication/`: django app managing wallet login, nonces, signature verification, and JWT generation.
+- `vault/`: django app handling file uploads, retrieving lists of files, and verifying NFT ownership for token-gated downloads.
+- `frontend/`: react + typescript single-page application built with vite, featuring tailwindcss-like modern vanilla styling.
 
-## API Endpoints
+## api endpoints
 
-### Authentication
-- `POST /api/auth/nonce/`: Generate a random login challenge for a wallet.
-  - **Body**: `{"wallet_address": "..."}`
-- `POST /api/auth/verify/`: Verify the signed nonce and return a JWT.
-  - **Body**: `{"wallet_address": "...", "signature": [...]}`
+### authentication
+- `POST /api/auth/nonce/`: generate a random login challenge for a wallet.
+  - **body**: `{"wallet_address": "..."}`
+- `POST /api/auth/verify/`: verify the signed nonce and return a JWT.
+  - **body**: `{"wallet_address": "...", "signature": [...]}`
 
-### Vault
-- `POST /api/vault/upload/`: Upload an encrypted file and specify the required NFT mint address.
-- `GET /api/vault/files/?wallet=<wallet_address>`: List files uploaded by a specific wallet.
-- `GET /api/vault/download/<id>/`: Download an encrypted file. Requires a valid JWT in the `Authorization: Bearer <token>` header. The backend queries the Solana blockchain to ensure the user owns the necessary NFT (unless the downloader is the uploader).
+### vault
+- `POST /api/vault/upload/`: upload an encrypted file and specify the required NFT mint address.
+- `GET /api/vault/files/?wallet=<wallet_address>`: list files uploaded by a specific wallet.
+- `GET /api/vault/download/<id>/`: download an encrypted file. this requires a valid JWT in the `Authorization: Bearer <token>` header. the backend queries the solana blockchain to ensure the user owns the necessary NFT (unless the downloader is the uploader).
 
-## Testing
+## testing
 
-A python simulator script `wallet_test.py` is included to test the backend authentication flow without needing a frontend or browser extension.
+a python simulator script `wallet_test.py` is included to test the backend authentication flow without needing a frontend or browser extension.
 
-Run the test script:
+run the test script:
 ```bash
 python wallet_test.py
 ```
-To run Django tests:
+to run django tests:
 ```bash
 python manage.py test
 ```

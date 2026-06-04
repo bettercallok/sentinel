@@ -6,7 +6,6 @@ import * as api from '../lib/api';
 interface AuthContextValue extends AuthState {
   connect: () => Promise<void>;
   disconnect: () => void;
-  devConnect: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
@@ -46,16 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsConnected(false);
   }, []);
 
-  const devConnect = useCallback(() => {
-    const devAddress = 'DEV_' + Math.random().toString(36).substring(2, 10).toUpperCase();
-    setWalletAddress(devAddress);
-    setIsConnected(true);
-    // Note: no real token in dev mode
-  }, []);
+
 
   const value = useMemo<AuthContextValue>(
-    () => ({ walletAddress, isConnected, token, connect, disconnect, devConnect }),
-    [walletAddress, isConnected, token, connect, disconnect, devConnect],
+    () => ({ walletAddress, isConnected, token, connect, disconnect }),
+    [walletAddress, isConnected, token, connect, disconnect],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

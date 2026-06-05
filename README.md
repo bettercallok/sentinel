@@ -20,6 +20,8 @@ sentinel is a web3-enabled application featuring a react + typescript frontend a
    ```
 3. the backend api will be available at http://localhost:8000.
 
+> **note on production databases**: the default `docker-compose.yml` uses a dockerized postgresql instance. for a production token-gated vault, we highly recommend using a managed postgres database (e.g. aws rds, supabase) by overriding the `DATABASE_URL` in your `.env`. if using the provided docker setup in production, ensure you have automated volume backups configured for `postgres_data`.
+
 ### frontend setup (react + typescript + vite)
 
 1. navigate to the frontend directory:

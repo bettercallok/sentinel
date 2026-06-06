@@ -159,7 +159,7 @@ REST_FRAMEWORK = {
 }
 
 # ---------------------------------------------------------------------------
-# Cloudflare R2 / S3-compatible Object Storage
+# AWS S3 Object Storage (for vault file blobs)
 # Enable by setting USE_S3=True in your environment variables.
 # When disabled, files are stored on the local filesystem (dev mode).
 # ---------------------------------------------------------------------------
@@ -168,9 +168,8 @@ if os.environ.get('USE_S3') == 'True':
     AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
     AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
-    AWS_S3_ENDPOINT_URL = os.environ.get('AWS_S3_ENDPOINT_URL')  # e.g. https://<account_id>.r2.cloudflarestorage.com
-    AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'auto')
+    AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'ap-south-1')
     AWS_DEFAULT_ACL = 'private'  # vault files must stay private
     AWS_QUERYSTRING_AUTH = True  # generate signed URLs for file access
     AWS_S3_SIGNATURE_VERSION = 's3v4'
-    MEDIA_URL = f"{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/"
+    MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/"

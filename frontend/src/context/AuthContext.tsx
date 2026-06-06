@@ -15,7 +15,7 @@ const TOKEN_KEY = 'sentinel_token';
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
-  const [isConnected, setIsConnected] = useState(() => !!localStorage.getItem(TOKEN_KEY));
+  const [isConnected, setIsConnected] = useState(false);
 
   const connect = useCallback(async () => {
     // 1. Connect to Phantom

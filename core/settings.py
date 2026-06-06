@@ -173,3 +173,25 @@ if os.environ.get('USE_S3') == 'True':
     AWS_QUERYSTRING_AUTH = True  # generate signed URLs for file access
     AWS_S3_SIGNATURE_VERSION = 's3v4'
     MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/"
+
+# Force Django to log all errors to the console
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'WARNING',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

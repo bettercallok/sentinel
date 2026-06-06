@@ -24,5 +24,8 @@ urlpatterns = [
         path('api/vault/', include('vault.urls')),
         path('api/auth/', include('authentication.urls')),
     ]
+
+# Serve media files in development (in production with R2, files are
+# served directly from object storage, but this keeps local dev working)
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

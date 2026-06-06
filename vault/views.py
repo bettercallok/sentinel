@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
-from django.http import FileResponse
+from django.http import FileResponse, StreamingHttpResponse
 from .models import EncryptedDocument
 from .serializers import EncryptedDocumentSerializer
 
@@ -133,8 +133,21 @@ class FileDownloadView(APIView):
                     status=status.HTTP_403_FORBIDDEN
                 )
 
-        # 4. Serve File
-        file = document.encrypted_file
-        response = FileResponse(file.open('rb'), content_type='application/octet-stream')
+        # 4. Serve File (works with both local filesystem and R2/S3 storage)
+        file_field = document.encrypted_file
+        file_handle = file_field.open('rb')
+
+        def file_iterator(f, chunk_size=8192):
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+            f.close()
+
+        response = StreamingHttpResponse(
+            file_iterator(file_handle),
+            content_type='application/octet-stream',
+        )
         response['Content-Disposition'] = f'attachment; filename="{document.file_name}.enc"'
         return response

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Background } from './components/Background';
 import { Navbar } from './components/Navbar';
 import { LandingScreen } from './screens/LandingScreen';
@@ -33,17 +33,13 @@ export default function App() {
     setScreen('dashboard');
   }, []);
 
-  // Reset to landing when disconnected
-  const handleDisconnect = useCallback(() => {
-    setScreen('landing');
-    setUploadResult(null);
-  }, []);
-
-  // Listen for disconnect via auth state
-  // (The Navbar calls disconnect which resets auth state)
-  if (!isConnected && screen !== 'landing') {
-    handleDisconnect();
-  }
+  // Reset to landing when disconnected — must be in useEffect to avoid render-loop
+  useEffect(() => {
+    if (!isConnected && screen !== 'landing') {
+      setScreen('landing');
+      setUploadResult(null);
+    }
+  }, [isConnected, screen]);
 
   return (
     <>

@@ -1,3 +1,11 @@
+---
+title: Sentinel API
+emoji: 🛡️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
 # sentinel
 
 sentinel is a web3-enabled application featuring a react + typescript frontend and a django rest api backend. the system supports solana wallet authentication and a token-gated encrypted file vault. users can authenticate using their solana wallets (like phantom) via a challenge-response signature mechanism. once authenticated, users can upload files and restrict downloads to holders of specific solana nfts.

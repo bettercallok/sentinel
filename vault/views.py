@@ -12,8 +12,11 @@ from .serializers import EncryptedDocumentSerializer
 def check_nft_ownership(wallet_address, nft_mint_address):
     """
     Queries the Solana blockchain to verify if a wallet holds a specific token/NFT.
+    Uses SOLANA_RPC_URL env var for a dedicated RPC (e.g. Helius, Alchemy free tier)
+    to avoid rate limits on the public shared endpoint.
     """
-    url = "https://api.mainnet-beta.solana.com"
+    import os
+    url = os.environ.get('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com')
     headers = {"Content-Type": "application/json"}
     payload = {
         "jsonrpc": "2.0",

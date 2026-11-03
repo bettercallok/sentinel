@@ -14,6 +14,14 @@ from pathlib import Path
 import os
 import dj_database_url
 
+
+def env_bool(name, default=False):
+    return os.environ.get(name, str(default)).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def env_list(name, default=''):
+    return [item.strip() for item in os.environ.get(name, default).split(',') if item.strip()]
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -25,13 +33,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-qibgvgwg58_=rr-%o*_-k&x3+b&eti69dnw7^k@9c1p9o7hk+l')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+DEBUG = env_bool('DEBUG', False)
 
 if not DEBUG and SECRET_KEY == 'django-insecure-qibgvgwg58_=rr-%o*_-k&x3+b&eti69dnw7^k@9c1p9o7hk+l':
     from django.core.exceptions import ImproperlyConfigured
     raise ImproperlyConfigured("You must change the SECRET_KEY in production!")
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost').split(',')
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
+CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
 
 
 # Application definition
@@ -50,7 +59,7 @@ INSTALLED_APPS = [
     'authentication',
 ]
 
-if os.environ.get('USE_S3') == 'True':
+if env_bool('USE_S3'):
     INSTALLED_APPS.append('storages')
 
 MIDDLEWARE = [
@@ -66,8 +75,11 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = [o for o in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:5173').split(',') if o]
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS', 'http://localhost:5173')
+# The API authenticates with bearer tokens, not cookies, so credentials are not needed.
+CORS_ALLOW_CREDENTIALS = False
+# Let the browser read the download filename header cross-origin.
+CORS_EXPOSE_HEADERS = ['Content-Disposition']
 
 ROOT_URLCONF = 'core.urls'
 
@@ -148,22 +160,81 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'authentication.authentication.WalletJWTAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
+    ],
+    'UNAUTHENTICATED_USER': None,
+    'DEFAULT_RENDERER_CLASSES': (
+        ['rest_framework.renderers.JSONRenderer', 'rest_framework.renderers.BrowsableAPIRenderer']
+        if DEBUG else ['rest_framework.renderers.JSONRenderer']
+    ),
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '20/minute',
-        'user': '100/minute'
-    }
+        'anon': os.environ.get('THROTTLE_ANON', '30/minute'),
+        'user': os.environ.get('THROTTLE_USER', '120/minute'),
+        'auth': os.environ.get('THROTTLE_AUTH', '10/minute'),
+    },
 }
+
+# ---------------------------------------------------------------------------
+# Wallet authentication
+# ---------------------------------------------------------------------------
+# A dedicated JWT secret lets you rotate sessions without touching SECRET_KEY.
+JWT_SECRET = os.environ.get('JWT_SECRET') or SECRET_KEY
+JWT_ISSUER = os.environ.get('JWT_ISSUER', 'sentinel-api')
+JWT_AUDIENCE = os.environ.get('JWT_AUDIENCE', 'sentinel-app')
+JWT_LIFETIME_SECONDS = int(os.environ.get('JWT_LIFETIME_SECONDS', 24 * 60 * 60))
+NONCE_TTL_SECONDS = int(os.environ.get('NONCE_TTL_SECONDS', 5 * 60))
+# Shown to the user inside the wallet's signature prompt.
+SIWS_DOMAIN = os.environ.get('SIWS_DOMAIN', 'Sentinel')
+SIWS_STATEMENT = os.environ.get(
+    'SIWS_STATEMENT',
+    'Sign in to the Sentinel vault. This request will not trigger a blockchain transaction or cost any fees.',
+)
+
+# ---------------------------------------------------------------------------
+# Vault
+# ---------------------------------------------------------------------------
+VAULT_MAX_UPLOAD_BYTES = int(os.environ.get('VAULT_MAX_UPLOAD_BYTES', 50 * 1024 * 1024))
+SOLANA_RPC_URL = os.environ.get('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com')
+SOLANA_RPC_TIMEOUT = float(os.environ.get('SOLANA_RPC_TIMEOUT', 5))
+NFT_OWNERSHIP_CACHE_SECONDS = int(os.environ.get('NFT_OWNERSHIP_CACHE_SECONDS', 60))
+
+# Admin is mounted at a configurable path to keep it off the obvious URL.
+ADMIN_URL = os.environ.get('ADMIN_URL', 'admin/').strip('/') + '/'
+
+# ---------------------------------------------------------------------------
+# Security hardening (active when DEBUG=False)
+# ---------------------------------------------------------------------------
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+X_FRAME_OPTIONS = 'DENY'
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    # Most PaaS hosts (Hugging Face, Koyeb, Render…) terminate TLS at a proxy.
+    if env_bool('TRUST_PROXY_SSL_HEADER', True):
+        SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', False)
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', 0))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', False)
+    SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', False)
+    SECURE_REDIRECT_EXEMPT = [r'^api/health/$']
 
 # ---------------------------------------------------------------------------
 # AWS S3 Object Storage (for vault file blobs)
 # Enable by setting USE_S3=True in your environment variables.
 # When disabled, files are stored on the local filesystem (dev mode).
 # ---------------------------------------------------------------------------
-if os.environ.get('USE_S3') == 'True':
+if env_bool('USE_S3'):
     DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
     AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
@@ -188,6 +259,11 @@ LOGGING = {
         'level': 'WARNING',
     },
     'loggers': {
+        'vault': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
         'django': {
             'handlers': ['console'],
             'level': 'INFO',

@@ -27,7 +27,24 @@ export async function signMessage(message: string): Promise<Uint8Array> {
 
 export function disconnectPhantom(): void {
   const provider = getPhantomProvider();
-  if (provider) {
-    provider.disconnect();
-  }
+  provider?.disconnect().catch(() => {
+    /* already disconnected */
+  });
+}
+
+/**
+ * Subscribe to Phantom account switches. The handler receives the new address,
+ * or null when the wallet no longer exposes one. Returns an unsubscribe function.
+ */
+export function onAccountChanged(handler: (address: string | null) => void): () => void {
+  const provider = getPhantomProvider();
+  if (!provider?.on) return () => {};
+  const listener = (publicKey?: { toString: () => string } | null) => {
+    handler(publicKey ? publicKey.toString() : null);
+  };
+  provider.on('accountChanged', listener);
+  return () => {
+    if (provider.off) provider.off('accountChanged', listener);
+    else provider.removeListener?.('accountChanged', listener);
+  };
 }

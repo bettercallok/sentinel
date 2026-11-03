@@ -15,11 +15,14 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToast(): ToastContextValue {
   const ctx = useContext(ToastContext);
   if (!ctx) throw new Error('useToast must be used within ToastProvider');
   return ctx;
 }
+
+const TOAST_ICONS: Record<ToastType, string> = { info: 'i', success: '✓', error: '✕' };
 
 let toastId = 0;
 
@@ -48,22 +51,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   // Cleanup timers on unmount
   useEffect(() => {
+    const timers = timersRef.current;
     return () => {
-      timersRef.current.forEach((timer) => clearTimeout(timer));
+      timers.forEach((timer) => clearTimeout(timer));
     };
   }, []);
 
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <div className="toast-container" id="toastContainer">
+      <div className="toast-container" id="toastContainer" role="status" aria-live="polite">
         {toasts.map((toast) => (
           <div
             key={toast.id}
             className={`toast ${toast.type}${toast.exiting ? ' exiting' : ''}`}
             style={toast.exiting ? { animation: 'fadeOutToast 300ms var(--ease-out) forwards' } : undefined}
           >
-            <span>{toast.type === 'error' ? '✕' : '✓'}</span> {toast.message}
+            <span className="toast-icon" aria-hidden="true">
+              {TOAST_ICONS[toast.type]}
+            </span>{' '}
+            {toast.message}
           </div>
         ))}
       </div>

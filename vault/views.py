@@ -1,23 +1,42 @@
-import jwt
+import hashlib
+import logging
+
 import requests
 from django.conf import settings
-from rest_framework.views import APIView
-from rest_framework.response import Response
+from django.core.cache import cache
+from django.http import FileResponse
+from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.parsers import MultiPartParser, FormParser
-from django.http import FileResponse, StreamingHttpResponse
+from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from authentication.authentication import IsWalletAuthenticated
+
 from .models import EncryptedDocument
-from .serializers import EncryptedDocumentSerializer
+from .serializers import EncryptedDocumentSerializer, SharedDocumentSerializer
+
+logger = logging.getLogger(__name__)
+
+
+class RPCUnavailable(Exception):
+    """The Solana RPC could not be reached or returned an unusable response."""
+
 
 def check_nft_ownership(wallet_address, nft_mint_address):
     """
-    Queries the Solana blockchain to verify if a wallet holds a specific token/NFT.
-    Uses SOLANA_RPC_URL env var for a dedicated RPC (e.g. Helius, Alchemy free tier)
-    to avoid rate limits on the public shared endpoint.
+    Return True if `wallet_address` holds at least one token of `nft_mint_address`.
+
+    Raises RPCUnavailable when the RPC fails, so callers can tell "doesn't own
+    it" apart from "couldn't check". Positive results are cached briefly to
+    spare the RPC on repeated downloads.
     """
-    import os
-    url = os.environ.get('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com')
-    headers = {"Content-Type": "application/json"}
+    cache_key = 'nft-owner:' + hashlib.sha256(
+        f'{wallet_address}:{nft_mint_address}'.encode()
+    ).hexdigest()
+    if cache.get(cache_key):
+        return True
+
     payload = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -25,132 +44,128 @@ def check_nft_ownership(wallet_address, nft_mint_address):
         "params": [
             wallet_address,
             {"mint": nft_mint_address},
-            {"encoding": "jsonParsed"}
-        ]
+            {"encoding": "jsonParsed"},
+        ],
     }
-    
+
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=5).json()
-        accounts = resp.get('result', {}).get('value', [])
-        
-        # Check if any account holding this mint has a balance > 0
-        for acc in accounts:
-            amount = int(acc['account']['data']['parsed']['info']['tokenAmount']['amount'])
-            if amount > 0:
-                return True
-        return False
-    except Exception as e:
-        print(f"RPC Error: {e}")
-        return False
+        resp = requests.post(settings.SOLANA_RPC_URL, json=payload, timeout=settings.SOLANA_RPC_TIMEOUT)
+        resp.raise_for_status()
+        body = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning('Solana RPC request failed: %s', exc)
+        raise RPCUnavailable from exc
+
+    if 'error' in body:
+        logger.warning('Solana RPC returned an error: %s', body['error'])
+        raise RPCUnavailable
+
+    try:
+        accounts = body['result']['value']
+        owns = any(
+            int(acc['account']['data']['parsed']['info']['tokenAmount']['amount']) > 0
+            for acc in accounts
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning('Unexpected Solana RPC response shape: %s', exc)
+        raise RPCUnavailable from exc
+
+    if owns:
+        cache.set(cache_key, True, settings.NFT_OWNERSHIP_CACHE_SECONDS)
+    return owns
 
 
 class FileUploadView(APIView):
-    # This allows the view to handle file uploads (multipart data)
+    permission_classes = [IsWalletAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, *args, **kwargs):
-        # JWT Authentication
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return Response({'error': 'Unauthorized. Missing token.'}, status=status.HTTP_401_UNAUTHORIZED)
-        token = auth_header.split(' ')[1]
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-            uploader_wallet = payload['wallet_address']
-        except jwt.ExpiredSignatureError:
-            return Response({'error': 'Session expired. Please reconnect wallet.'}, status=status.HTTP_401_UNAUTHORIZED)
-        except jwt.InvalidTokenError:
-            return Response({'error': 'Invalid token.'}, status=status.HTTP_401_UNAUTHORIZED)
+        if 'encrypted_file' not in request.FILES:
+            return Response({'error': 'encrypted_file is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        file_obj = request.FILES.get('encrypted_file')
-        if file_obj and file_obj.size > 50 * 1024 * 1024:
-            return Response({'error': 'File too large. Maximum size is 50MB.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Override uploader_wallet with trusted value from JWT
-        data = request.data.copy()
-        data['uploader_wallet'] = uploader_wallet
-        serializer = EncryptedDocumentSerializer(data=data)
+        serializer = EncryptedDocumentSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            # The uploader always comes from the verified JWT, never the form.
+            serializer.save(uploader_wallet=request.user.wallet_address)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class FileListView(APIView):
-    """List all encrypted documents uploaded by a specific wallet."""
+    """List the encrypted documents uploaded by the authenticated wallet."""
+
+    permission_classes = [IsWalletAuthenticated]
 
     def get(self, request):
-        # JWT Authentication
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return Response({'error': 'Unauthorized. Missing token.'}, status=status.HTTP_401_UNAUTHORIZED)
-        token = auth_header.split(' ')[1]
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-            wallet = payload['wallet_address']
-        except jwt.ExpiredSignatureError:
-            return Response({'error': 'Session expired. Please reconnect wallet.'}, status=status.HTTP_401_UNAUTHORIZED)
-        except jwt.InvalidTokenError:
-            return Response({'error': 'Invalid token.'}, status=status.HTTP_401_UNAUTHORIZED)
-
         documents = EncryptedDocument.objects.filter(
-            uploader_wallet=wallet
+            uploader_wallet=request.user.wallet_address
         ).order_by('-uploaded_at')
+        return Response(EncryptedDocumentSerializer(documents, many=True).data)
 
-        serializer = EncryptedDocumentSerializer(documents, many=True)
-        return Response(serializer.data)
+
+class DocumentDetailView(APIView):
+    """
+    GET: metadata for a share link (any signed-in wallet with the link).
+    DELETE: remove the document and its blob (uploader only).
+    """
+
+    permission_classes = [IsWalletAuthenticated]
+
+    def get(self, request, public_id):
+        document = get_object_or_404(EncryptedDocument, public_id=public_id)
+        return Response(SharedDocumentSerializer(document, context={'request': request}).data)
+
+    def delete(self, request, public_id):
+        document = get_object_or_404(EncryptedDocument, public_id=public_id)
+        if document.uploader_wallet != request.user.wallet_address:
+            return Response(
+                {'error': 'Only the uploader can delete this document.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            document.encrypted_file.delete(save=False)
+        except Exception:  # storage errors must not leave the row orphaned
+            logger.exception('Failed to delete blob for document %s', document.pk)
+        document.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class FileDownloadView(APIView):
-    """Serve an encrypted file blob ONLY if the user owns the required NFT."""
+    """Serve an encrypted blob only if the caller is the uploader or holds the NFT."""
 
-    def get(self, request, pk):
-        # 1. JWT Authentication Check
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return Response({'error': 'Unauthorized. Missing token.'}, status=status.HTTP_401_UNAUTHORIZED)
+    permission_classes = [IsWalletAuthenticated]
 
-        token = auth_header.split(' ')[1]
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-            downloader_wallet = payload['wallet_address']
-        except jwt.ExpiredSignatureError:
-            return Response({'error': 'Session expired. Please reconnect wallet.'}, status=status.HTTP_401_UNAUTHORIZED)
-        except jwt.InvalidTokenError:
-            return Response({'error': 'Invalid token.'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        # 2. Fetch Document
-        try:
-            document = EncryptedDocument.objects.get(pk=pk)
-        except EncryptedDocument.DoesNotExist:
+    def get(self, request, pk=None, public_id=None):
+        if public_id is not None:
+            document = EncryptedDocument.objects.filter(public_id=public_id).first()
+        else:
+            document = EncryptedDocument.objects.filter(pk=pk).first()
+        if document is None:
             return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # 3. The Gatekeeper: Check Solana Blockchain
-        # Note: We automatically bypass the check for the person who uploaded the file.
-        # IF YOU WANT TO TEST THE REJECTION ON YOURSELF, temporarily comment out the 'if' line below!
+        downloader_wallet = request.user.wallet_address
+
+        # The uploader always has access to their own documents.
         if document.uploader_wallet != downloader_wallet:
-            owns_nft = check_nft_ownership(downloader_wallet, document.required_nft_address)
+            try:
+                owns_nft = check_nft_ownership(downloader_wallet, document.required_nft_address)
+            except RPCUnavailable:
+                return Response(
+                    {'error': 'Could not verify NFT ownership right now. Please try again shortly.'},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
             if not owns_nft:
                 return Response(
-                    {'error': f'Access Denied. Wallet {downloader_wallet[:4]}... does not hold the required NFT.'}, 
-                    status=status.HTTP_403_FORBIDDEN
+                    {'error': f'Access Denied. Wallet {downloader_wallet[:4]}... does not hold the required NFT.'},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
 
-        # 4. Serve File (works with both local filesystem and R2/S3 storage)
-        file_field = document.encrypted_file
-        file_handle = file_field.open('rb')
-
-        def file_iterator(f, chunk_size=8192):
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                yield chunk
-            f.close()
-
-        response = StreamingHttpResponse(
-            file_iterator(file_handle),
+        # FileResponse streams the blob and RFC 5987-encodes the filename.
+        response = FileResponse(
+            document.encrypted_file.open('rb'),
+            as_attachment=True,
+            filename=f'{document.file_name}.enc',
             content_type='application/octet-stream',
         )
-        response['Content-Disposition'] = f'attachment; filename="{document.file_name}.enc"'
+        response['Cache-Control'] = 'no-store'
         return response

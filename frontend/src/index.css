@@ -19,6 +19,9 @@
   --gray-5: #cccccc;
   --light-1: #e0e0e0;
   --white: #ffffff;
+  /* Single accent reserved for destructive actions & validation errors */
+  --danger: #e5484d;
+  --danger-soft: rgba(229, 72, 77, 0.12);
 
   /* Typography */
   --font-display: 'Playfair Display', Georgia, serif;
@@ -1025,4 +1028,192 @@ body {
 
 .modal-overlay.active .modal-content {
   transform: translateY(0);
+}
+
+/* ============================================
+   v2.1 additions — validation, actions, a11y
+   ============================================ */
+
+:focus-visible {
+  outline: 2px solid var(--gray-4);
+  outline-offset: 2px;
+}
+
+.drop-zone:focus-visible {
+  outline-offset: 4px;
+}
+
+.form-input.has-error {
+  border-color: var(--danger);
+}
+
+.form-error {
+  margin-top: var(--space-sm);
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.mono-input {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+/* Key input with show/hide toggle */
+.key-input-wrapper {
+  position: relative;
+}
+
+.key-input-wrapper .form-input {
+  padding-right: 4.5rem;
+  font-family: var(--font-mono);
+}
+
+.key-reveal {
+  position: absolute;
+  top: 50%;
+  right: var(--space-sm);
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--gray-3);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+}
+
+.key-reveal:hover {
+  color: var(--white);
+}
+
+/* Vault table */
+.section-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.table-empty {
+  text-align: center;
+  color: var(--gray-3);
+}
+
+.file-name-cell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  white-space: nowrap;
+}
+
+.row-actions .btn-ghost {
+  padding: var(--space-xs) var(--space-md);
+  font-size: 0.8rem;
+}
+
+.btn-ghost-danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-bottom: 1px dashed var(--gray-2);
+}
+
+.link-button.success-detail-value {
+  font-family: var(--font-mono);
+}
+
+.link-button:hover {
+  color: var(--white);
+  border-bottom-color: var(--gray-4);
+}
+
+.modal-content .btn-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.modal-content .btn-danger:hover {
+  background: var(--danger);
+  color: var(--white);
+}
+
+/* Success / shared screens */
+.share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+/* Toasts */
+.toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--gray-1);
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+}
+
+.toast.error {
+  border-color: var(--danger);
+}
+
+.toast.error .toast-icon {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Landing */
+.landing-footnote {
+  margin: var(--space-lg) auto 0;
+  max-width: 440px;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--gray-3);
+}
+
+@media (max-width: 768px) {
+  .file-name-cell {
+    max-width: 140px;
+  }
+
+  .section-header-row {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

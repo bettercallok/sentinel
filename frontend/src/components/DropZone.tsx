@@ -1,17 +1,11 @@
 import { useCallback, useRef, useState, type DragEvent } from 'react';
+import { MAX_UPLOAD_BYTES } from '../config';
+import { formatBytes } from '../lib/format';
 
 interface DropZoneProps {
   onFileSelect: (file: File) => void;
   selectedFile: File | null;
   onFileRemove: () => void;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
 export function DropZone({ onFileSelect, selectedFile, onFileRemove }: DropZoneProps) {
@@ -75,12 +69,23 @@ export function DropZone({ onFileSelect, selectedFile, onFileRemove }: DropZoneP
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleClick();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label="Choose a file to encrypt and upload"
     >
       <div className="drop-zone-icon">📁</div>
       <p className="drop-zone-text">
         Drop your file here, or <strong style={{ color: 'var(--white)' }}>browse</strong>
       </p>
-      <p className="drop-zone-hint">Any file type accepted</p>
+      <p className="drop-zone-hint">
+        Any file type · up to {formatBytes(MAX_UPLOAD_BYTES)} · encrypted in your browser
+      </p>
       <input
         ref={inputRef}
         type="file"
@@ -97,7 +102,7 @@ export function DropZone({ onFileSelect, selectedFile, onFileRemove }: DropZoneP
             <div className="file-name" id="fileName">{selectedFile.name}</div>
             <div className="file-size" id="fileSize">{formatBytes(selectedFile.size)}</div>
           </div>
-          <button type="button" className="file-remove" onClick={handleRemove}>
+          <button type="button" className="file-remove" onClick={handleRemove} aria-label="Remove file">
             ✕
           </button>
         </div>

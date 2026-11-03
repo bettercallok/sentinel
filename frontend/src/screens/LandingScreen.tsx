@@ -3,10 +3,11 @@ import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../components/Toast';
 
 interface LandingScreenProps {
-  onConnected: () => void;
+  /** True when the user arrived via a share link. */
+  sharedDocument?: boolean;
 }
 
-export function LandingScreen({ onConnected }: LandingScreenProps) {
+export function LandingScreen({ sharedDocument = false }: LandingScreenProps) {
   const { connect } = useAuth();
   const { showToast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -16,20 +17,21 @@ export function LandingScreen({ onConnected }: LandingScreenProps) {
     try {
       await connect();
       showToast('Wallet connected successfully', 'success');
-      onConnected();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Connection failed';
-      if (msg !== 'User rejected the request.') {
+      if (/rejected/i.test(msg)) {
+        showToast('Signature request was cancelled', 'info');
+      } else {
         showToast(msg, 'error');
       }
       // If Phantom is not installed, open their site
       if (msg.includes('not found')) {
-        window.open('https://phantom.app/', '_blank');
+        window.open('https://phantom.app/', '_blank', 'noopener,noreferrer');
       }
     } finally {
       setLoading(false);
     }
-  }, [connect, showToast, onConnected]);
+  }, [connect, showToast]);
 
   return (
     <section className="screen active" id="screenLanding">
@@ -45,8 +47,9 @@ export function LandingScreen({ onConnected }: LandingScreenProps) {
         </h1>
 
         <p className="landing-subtitle">
-          Sentinel is an NFT-gated vault for encrypted documents.
-          Only verified holders can access what you protect.
+          {sharedDocument
+            ? 'Someone shared an NFT-gated document with you. Connect your wallet to check access and unlock it.'
+            : 'Sentinel is an NFT-gated vault for encrypted documents. Only verified holders can access what you protect.'}
         </p>
 
         <button
@@ -79,6 +82,11 @@ export function LandingScreen({ onConnected }: LandingScreenProps) {
             </>
           )}
         </button>
+
+        <p className="landing-footnote">
+          Signing in only asks your wallet to sign a message — no transaction, no fees.
+          Files are encrypted in your browser; the server never sees your keys.
+        </p>
       </div>
     </section>
   );

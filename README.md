@@ -15,10 +15,14 @@ sentinel is a web3-enabled application featuring a react + typescript frontend a
 
 ## features
 
-- **solana wallet authentication**: secure login without passwords. the backend generates a challenge nonce which is signed by the user's wallet. the signature is verified using PyNaCl and base58.
+- **solana wallet authentication**: secure login without passwords. the backend issues a human-readable, domain-bound sign-in message (nonce + timestamp) which the wallet signs. the signature is verified with PyNaCl, and each challenge can only be used once.
+- **client-side encryption**: files are encrypted with AES-256-GCM in the browser. the server only ever stores ciphertext and never sees the key.
 - **token-gated file vault**: upload encrypted documents and lock them behind NFT ownership.
-- **on-chain verification**: queries the Solana mainnet RPC to check if a downloader's wallet holds the required NFT mint before serving the file.
-- **jwt session management**: issues a secure, short-lived JSON Web Token after successful wallet verification.
+- **share links**: send `/?doc=<id>` to NFT holders so they can download and decrypt. you can also embed the key in the URL fragment (`#key=…`), which browsers never send to the server.
+- **on-chain verification**: queries a Solana RPC to check that the downloader's wallet holds the required NFT mint before serving the file. RPC outages return `503` instead of a misleading "access denied".
+- **jwt session management**: issues a short-lived JWT (with `iss`/`aud` claims) after wallet verification. sessions survive page reloads and end automatically on expiry or when you switch accounts in Phantom.
+
+see [`docs/AUDIT.md`](docs/AUDIT.md) for the security audit and the reasoning behind these design choices.
 
 ## setup instructions
 
@@ -79,24 +83,50 @@ sentinel is a web3-enabled application featuring a react + typescript frontend a
 
 ## api endpoints
 
+all authenticated endpoints expect `Authorization: Bearer <token>`.
+
 ### authentication
-- `POST /api/auth/nonce/`: generate a random login challenge for a wallet.
+- `POST /api/auth/nonce/`: create a login challenge for a wallet.
   - **body**: `{"wallet_address": "..."}`
-- `POST /api/auth/verify/`: verify the signed nonce and return a JWT.
-  - **body**: `{"wallet_address": "...", "signature": [...]}`
+  - **returns**: `{"wallet", "nonce", "message"}`. the wallet must sign `message` exactly as returned.
+- `POST /api/auth/verify/`: verify the signature over `message` and return a JWT.
+  - **body**: `{"wallet_address": "...", "signature": [64 bytes] | "<base58>"}`
+  - **returns**: `{"token", "wallet_address", "expires_at", ...}`
+- `GET /api/auth/me/`: validate the current token and return `{"wallet_address", "expires_at"}`.
 
 ### vault
-- `POST /api/vault/upload/`: upload an encrypted file and specify the required NFT mint address.
-- `GET /api/vault/files/?wallet=<wallet_address>`: list files uploaded by a specific wallet.
-- `GET /api/vault/download/<id>/`: download an encrypted file. this requires a valid JWT in the `Authorization: Bearer <token>` header. the backend queries the solana blockchain to ensure the user owns the necessary NFT (unless the downloader is the uploader).
+- `POST /api/vault/upload/` (multipart): `encrypted_file`, `file_name`, `required_nft_address`. the uploader is always taken from the JWT.
+- `GET /api/vault/files/`: list documents uploaded by the authenticated wallet.
+- `GET /api/vault/documents/<public_id>/`: metadata for a share link (file name, size, NFT gate, `is_owner`).
+- `DELETE /api/vault/documents/<public_id>/`: delete a document and its blob (uploader only).
+- `GET /api/vault/documents/<public_id>/download/`: download the encrypted blob. the uploader always has access; anyone else must hold the required NFT, which is checked on-chain. (`GET /api/vault/download/<id>/` is kept for older clients.)
+
+### operations
+- `GET /api/health/`: health probe (checks the database).
+
+## configuration
+
+all settings come from environment variables. see [`.env.example`](.env.example) for the full list, including:
+`JWT_SECRET`, `SIWS_DOMAIN`, `ADMIN_URL`, `CSRF_TRUSTED_ORIGINS`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`, `THROTTLE_*`, `VAULT_MAX_UPLOAD_BYTES` and `SOLANA_RPC_URL`.
 
 ## testing
 
-a python simulator script `wallet_test.py` is included to test the backend authentication flow without needing a frontend or browser extension.
-
-run the test script:
+run the backend test suite:
 ```bash
-python wallet_test.py
+DEBUG=True python manage.py test
+```
+
+lint and type-check the frontend:
+```bash
+cd frontend && npm run lint && npm run build
+```
+
+both run in CI on every pull request (`.github/workflows/ci.yml`).
+
+a python simulator script, `wallet_test.py`, exercises the sign-in flow against a running server without needing a browser wallet:
+```bash
+python wallet_test.py                                   # http://localhost:8000
+SENTINEL_API=https://your-api.example.com python wallet_test.py
 ```
 to run django tests:
 ```bash

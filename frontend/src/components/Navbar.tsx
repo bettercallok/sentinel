@@ -1,9 +1,5 @@
 import { useAuth } from '../hooks/useAuth';
-
-function truncateAddress(addr: string | null): string {
-  if (!addr) return '—';
-  return addr.slice(0, 4) + '...' + addr.slice(-4);
-}
+import { truncateAddress } from '../lib/format';
 
 export function Navbar() {
   const { isConnected, walletAddress, disconnect } = useAuth();
@@ -17,7 +13,7 @@ export function Navbar() {
       <div className="navbar-status">
         {isConnected && walletAddress && (
           <>
-            <div className="wallet-badge" id="walletBadge">
+            <div className="wallet-badge" id="walletBadge" title={walletAddress}>
               <span className="dot" />
               <span id="walletBadgeAddress">{truncateAddress(walletAddress)}</span>
             </div>

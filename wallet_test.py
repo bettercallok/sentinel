@@ -1,46 +1,50 @@
-import requests
+"""
+Sentinel wallet simulator: exercises the sign-in flow without a browser wallet.
+
+Usage:
+    python wallet_test.py                      # against http://localhost:8000
+    SENTINEL_API=https://api.example.com python wallet_test.py
+"""
+import os
+
 import base58
+import requests
 from nacl.signing import SigningKey
+
+API = os.environ.get('SENTINEL_API', 'http://localhost:8000').rstrip('/')
 
 print("---  Sentinel Wallet Simulator  ---")
 
-# 1. Generate a fake Phantom Wallet keypair
-print("\n1. Generating fake Solana Keypair...")
+# 1. Generate a throwaway Solana keypair
+print("\n1. Generating fake Solana keypair...")
 private_key = SigningKey.generate()
-public_key_bytes = private_key.verify_key.encode()
-wallet_address = base58.b58encode(public_key_bytes).decode('utf-8')
-
+wallet_address = base58.b58encode(private_key.verify_key.encode()).decode('utf-8')
 print(f"   => Wallet Address: {wallet_address}")
 
-# 2. Ask Django for a Nonce (The Challenge)
-print("\n2. Asking Django for a login challenge...")
-nonce_response = requests.post(
-    'http://localhost:8000/api/auth/nonce/',
-    json={'wallet_address': wallet_address}
-)
-nonce_data = nonce_response.json()
-nonce_str = nonce_data.get('nonce')
-print(f"   => Received Nonce: {nonce_str}")
+# 2. Ask the API for a sign-in challenge
+print("\n2. Requesting a login challenge...")
+nonce_response = requests.post(f'{API}/api/auth/nonce/', json={'wallet_address': wallet_address}, timeout=10)
+nonce_response.raise_for_status()
+challenge = nonce_response.json()
+message = challenge['message']
+print("   => Message to sign:\n" + "\n".join(f"      | {line}" for line in message.splitlines()))
 
-# 3. Sign the Nonce (What Phantom Wallet does when you click 'Approve')
-print("\n3. Phantom Wallet is signing the nonce with the Private Key...")
-message_bytes = nonce_str.encode('utf-8')
-signed_message = private_key.sign(message_bytes)
+# 3. Sign the message (what Phantom does when you click 'Approve')
+print("\n3. Signing the message with the private key...")
+signature_list = list(private_key.sign(message.encode('utf-8')).signature)
 
-# Extract just the signature part and convert to a normal list of numbers 
-# (This is exactly how a Next.js frontend sends it!)
-signature_list = list(signed_message.signature)
-
-# 4. Send the signature to Django for verification
-print("\n4. Sending the signature to Django to verify the math...")
+# 4. Exchange the signature for a session token
+print("\n4. Sending the signature for verification...")
 verify_response = requests.post(
-    'http://localhost:8000/api/auth/verify/',
-    json={
-        'wallet_address': wallet_address,
-        'signature': signature_list
-    }
+    f'{API}/api/auth/verify/',
+    json={'wallet_address': wallet_address, 'signature': signature_list},
+    timeout=10,
 )
+print(f"   => Status Code: {verify_response.status_code}")
+data = verify_response.json()
+print(f"   => {data}")
 
-print("\n--- 🏁 Django Response 🏁 ---")
-print(f"Status Code: {verify_response.status_code}")
-print(verify_response.json())
+# 5. Use the token
+if verify_response.ok:
+    me = requests.get(f'{API}/api/auth/me/', headers={'Authorization': f"Bearer {data['token']}"}, timeout=10)
+    print(f"\n5. /api/auth/me/ -> {me.status_code} {me.json()}")

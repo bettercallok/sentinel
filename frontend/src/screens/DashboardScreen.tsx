@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../components/Toast';
+import { useCopy } from '../hooks/useCopy';
+import { useDocumentDownload } from '../hooks/useDocumentDownload';
 import { DropZone } from '../components/DropZone';
 import { KeyModal } from '../components/KeyModal';
+import { ConfirmModal } from '../components/ConfirmModal';
 import * as apiClient from '../lib/api';
 import * as crypto from '../lib/crypto';
+import { isValidSolanaAddress } from '../lib/base58';
+import { formatBytes, truncateAddress } from '../lib/format';
+import { buildShareLink } from '../lib/share';
+import { ENCRYPTION_OVERHEAD_BYTES, MAX_UPLOAD_BYTES } from '../config';
 import type { DocumentResponse } from '../types';
-
-function truncateAddress(addr: string | null): string {
-  if (!addr) return '—';
-  return addr.slice(0, 4) + '...' + addr.slice(-4);
-}
 
 interface DashboardScreenProps {
   onUploadSuccess: (data: DocumentResponse, encryptionKey: string) => void;
@@ -19,46 +21,76 @@ interface DashboardScreenProps {
 export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
   const { walletAddress, token } = useAuth();
   const { showToast } = useToast();
+  const copy = useCopy();
+  const { download } = useDocumentDownload();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [nftAddress, setNftAddress] = useState('');
+  const [nftTouched, setNftTouched] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [files, setFiles] = useState<DocumentResponse[]>([]);
   const [filesLoading, setFilesLoading] = useState(true);
 
-  // Modal state
-  const [modalOpen, setModalOpen] = useState(false);
-  const [pendingDownload, setPendingDownload] = useState<{ fileId: number; fileName: string } | null>(null);
+  const [pendingDownload, setPendingDownload] = useState<DocumentResponse | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DocumentResponse | null>(null);
+
+  const trimmedNft = nftAddress.trim();
+  const nftInvalid = trimmedNft.length > 0 && !isValidSolanaAddress(trimmedNft);
 
   // ─── Load vault files ──────────────────────
-  const loadFiles = useCallback(async () => {
-    if (!token) return;
-    setFilesLoading(true);
-    try {
-      const data = await apiClient.listFiles(token);
-      setFiles(data);
-    } catch {
-      showToast('Error loading vault files', 'error');
-    } finally {
-      setFilesLoading(false);
-    }
-  }, [token, showToast]);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    loadFiles();
-  }, [loadFiles]);
+    if (!token) return;
+    let cancelled = false;
+    apiClient
+      .listFiles(token)
+      .then((data) => {
+        if (!cancelled) setFiles(data);
+      })
+      .catch(() => {
+        if (!cancelled) showToast('Error loading vault files', 'error');
+      })
+      .finally(() => {
+        if (!cancelled) setFilesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, showToast, reloadKey]);
+
+  const refreshFiles = useCallback(() => {
+    setFilesLoading(true);
+    setReloadKey((k) => k + 1);
+  }, []);
 
   // ─── Upload ────────────────────────────────
+  const handleFileSelect = useCallback(
+    (file: File) => {
+      if (file.size + ENCRYPTION_OVERHEAD_BYTES > MAX_UPLOAD_BYTES) {
+        showToast(`File too large. Maximum size is ${formatBytes(MAX_UPLOAD_BYTES)}.`, 'error');
+        return;
+      }
+      if (file.size === 0) {
+        showToast('That file is empty.', 'error');
+        return;
+      }
+      setSelectedFile(file);
+    },
+    [showToast],
+  );
+
   const handleUpload = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      setNftTouched(true);
 
       if (!selectedFile) {
         showToast('Please select a file to upload', 'error');
         return;
       }
-      if (!nftAddress.trim()) {
-        showToast('Please enter an NFT address', 'error');
+      if (!isValidSolanaAddress(trimmedNft)) {
+        showToast('Please enter a valid Solana NFT mint address', 'error');
         return;
       }
       if (!token || !walletAddress) {
@@ -68,17 +100,14 @@ export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
 
       setUploading(true);
       try {
-        // Client-side encryption
-        showToast('Encrypting file...', 'info');
+        showToast('Encrypting file in your browser...', 'info');
         const cryptoKey = await crypto.generateKey();
         const { encryptedBlob, exportedKey } = await crypto.encryptFile(selectedFile, cryptoKey);
 
-        // Build FormData
         const formData = new FormData();
-        formData.append('uploader_wallet', walletAddress);
         formData.append('file_name', selectedFile.name);
-        formData.append('encrypted_file', encryptedBlob, selectedFile.name + '.enc');
-        formData.append('required_nft_address', nftAddress.trim());
+        formData.append('encrypted_file', encryptedBlob, 'blob.enc');
+        formData.append('required_nft_address', trimmedNft);
 
         const data = await apiClient.uploadFile(formData, token);
 
@@ -86,59 +115,46 @@ export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
         onUploadSuccess(data, exportedKey);
       } catch (err) {
         console.error('Upload error:', err);
-        showToast('Upload failed. Check the console for details.', 'error');
+        showToast(err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed.', 'error');
       } finally {
         setUploading(false);
       }
     },
-    [selectedFile, nftAddress, token, walletAddress, showToast, onUploadSuccess],
+    [selectedFile, trimmedNft, token, walletAddress, showToast, onUploadSuccess],
   );
 
   const resetForm = useCallback(() => {
     setSelectedFile(null);
     setNftAddress('');
+    setNftTouched(false);
   }, []);
 
-  // ─── Download flow ─────────────────────────
-  const promptDownload = useCallback((fileId: number, fileName: string) => {
-    setPendingDownload({ fileId, fileName });
-    setModalOpen(true);
-  }, []);
-
+  // ─── Download / delete ─────────────────────
   const handleDecrypt = useCallback(
-    async (keyInput: string) => {
-      if (!pendingDownload || !token) return;
-      setModalOpen(false);
-
-      const { fileId, fileName } = pendingDownload;
+    (key: string) => {
+      if (!pendingDownload) return;
+      const doc = pendingDownload;
       setPendingDownload(null);
-
-      try {
-        showToast('Retrieving encrypted blob...', 'info');
-        const encryptedBlob = await apiClient.downloadFile(fileId, token);
-
-        showToast('Decrypting document locally...', 'info');
-        const decryptedBlob = await crypto.decryptFile(encryptedBlob, keyInput);
-
-        // Trigger browser download
-        const url = URL.createObjectURL(decryptedBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        showToast('Decryption successful!', 'success');
-      } catch (err) {
-        console.error('Decryption error:', err);
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        showToast(`Decryption failed: ${msg}`, 'error');
-      }
+      download(doc.public_id, doc.file_name, key);
     },
-    [pendingDownload, token, showToast],
+    [pendingDownload, download],
   );
+
+  const handleDelete = useCallback(async () => {
+    if (!pendingDelete || !token) return;
+    const doc = pendingDelete;
+    setPendingDelete(null);
+    try {
+      await apiClient.deleteDocument(doc.public_id, token);
+      setFiles((prev) => prev.filter((f) => f.public_id !== doc.public_id));
+      showToast(`Deleted ${doc.file_name}`, 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
+    }
+  }, [pendingDelete, token, showToast]);
+
+  const closeKeyModal = useCallback(() => setPendingDownload(null), []);
+  const closeDeleteModal = useCallback(() => setPendingDelete(null), []);
 
   return (
     <section className="screen active" id="screenDashboard">
@@ -162,7 +178,7 @@ export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
           </div>
           <div className="stat-card">
             <div className="stat-label">Documents</div>
-            <div className="stat-value" id="sessionTime">{files.length}</div>
+            <div className="stat-value">{filesLoading ? '—' : files.length}</div>
           </div>
         </div>
 
@@ -170,33 +186,44 @@ export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
         <div className="upload-section">
           <h3 className="upload-section-title">Upload Document</h3>
           <p className="upload-section-desc">
-            Select an encrypted file and specify the NFT address required for access.
+            Your file is encrypted with AES-256 in this browser before upload. Choose the NFT a wallet must hold to download it.
           </p>
 
-          <form id="uploadForm" onSubmit={handleUpload}>
+          <form id="uploadForm" onSubmit={handleUpload} noValidate>
             <DropZone
-              onFileSelect={setSelectedFile}
+              onFileSelect={handleFileSelect}
               selectedFile={selectedFile}
               onFileRemove={() => setSelectedFile(null)}
             />
 
             <div className="form-group">
               <label className="form-label" htmlFor="nftAddress">
-                Required NFT Address
+                Required NFT Mint Address
               </label>
               <input
-                className="form-input"
+                className={`form-input mono-input${nftTouched && nftInvalid ? ' has-error' : ''}`}
                 type="text"
                 id="nftAddress"
                 name="required_nft_address"
                 placeholder="e.g. AbC1dEf2GhI3jKl4MnO5pQr6StU7vWx8yZ..."
                 value={nftAddress}
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={nftTouched && nftInvalid}
+                aria-describedby="nftAddressHint"
                 onChange={(e) => setNftAddress(e.target.value)}
+                onBlur={() => setNftTouched(true)}
                 required
               />
-              <p className="form-hint">
-                Only wallets holding this NFT will be able to access the file.
-              </p>
+              {nftTouched && nftInvalid ? (
+                <p className="form-error" id="nftAddressHint" role="alert">
+                  That isn&apos;t a valid Solana address (base58, 32–44 characters).
+                </p>
+              ) : (
+                <p className="form-hint" id="nftAddressHint">
+                  Only wallets holding this NFT will be able to access the file.
+                </p>
+              )}
             </div>
 
             <div className="form-actions">
@@ -213,16 +240,8 @@ export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
                 ) : (
                   <>
                     <span className="btn-shine" />
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                       <polyline points="17 8 12 3 7 8" />
                       <line x1="12" y1="3" x2="12" y2="15" />
@@ -231,7 +250,7 @@ export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
                   </>
                 )}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={resetForm}>
+              <button type="button" className="btn btn-ghost" onClick={resetForm} disabled={uploading}>
                 Clear
               </button>
             </div>
@@ -240,52 +259,74 @@ export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
 
         {/* Vault Files Table */}
         <div className="upload-section" style={{ marginTop: '2rem' }}>
-          <h3 className="upload-section-title">Your Vault</h3>
-          <p className="upload-section-desc">
-            Documents uploaded by your wallet address.
-          </p>
+          <div className="section-header-row">
+            <div>
+              <h3 className="upload-section-title">Your Vault</h3>
+              <p className="upload-section-desc">Documents uploaded by your wallet address.</p>
+            </div>
+            <button type="button" className="btn-ghost" onClick={refreshFiles} disabled={filesLoading}>
+              Refresh
+            </button>
+          </div>
 
           <div className="table-container">
             <table className="vault-table">
               <thead>
                 <tr>
                   <th>File Name</th>
+                  <th>Size</th>
                   <th>NFT Gate</th>
                   <th>Date</th>
-                  <th>Action</th>
+                  <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody id="vaultFilesBody">
                 {filesLoading ? (
                   <tr>
-                    <td colSpan={4} style={{ textAlign: 'center' }}>
-                      Loading vault contents...
-                    </td>
+                    <td colSpan={5} className="table-empty">Loading vault contents...</td>
                   </tr>
                 ) : files.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={4}
-                      style={{ textAlign: 'center', color: 'var(--gray-3)' }}
-                    >
-                      No documents in your vault yet.
-                    </td>
+                    <td colSpan={5} className="table-empty">No documents in your vault yet.</td>
                   </tr>
                 ) : (
                   files.map((file) => (
-                    <tr key={file.id}>
-                      <td>{file.file_name}</td>
+                    <tr key={file.public_id}>
+                      <td className="file-name-cell" title={file.file_name}>{file.file_name}</td>
+                      <td className="mono-text">{formatBytes(file.file_size)}</td>
                       <td className="mono-text">
-                        {truncateAddress(file.required_nft_address)}
+                        <button
+                          type="button"
+                          className="link-button"
+                          title={`${file.required_nft_address} — click to copy`}
+                          onClick={() => copy(file.required_nft_address, 'NFT address copied')}
+                        >
+                          {truncateAddress(file.required_nft_address)}
+                        </button>
                       </td>
                       <td>{new Date(file.uploaded_at).toLocaleDateString()}</td>
                       <td>
-                        <button
-                          className="btn-ghost"
-                          onClick={() => promptDownload(file.id, file.file_name)}
-                        >
-                          Download
-                        </button>
+                        <div className="row-actions">
+                          <button type="button" className="btn-ghost" onClick={() => setPendingDownload(file)}>
+                            Download
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            title="Copy a link NFT holders can use to download (key not included)"
+                            onClick={() => copy(buildShareLink(file.public_id), 'Share link copied (key not included)')}
+                          >
+                            Share
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-ghost btn-ghost-danger"
+                            aria-label={`Delete ${file.file_name}`}
+                            onClick={() => setPendingDelete(file)}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -296,14 +337,25 @@ export function DashboardScreen({ onUploadSuccess }: DashboardScreenProps) {
         </div>
       </div>
 
-      {/* Decryption Key Modal */}
       <KeyModal
-        isOpen={modalOpen}
-        onClose={() => {
-          setModalOpen(false);
-          setPendingDownload(null);
-        }}
+        isOpen={pendingDownload !== null}
+        fileName={pendingDownload?.file_name}
+        onClose={closeKeyModal}
         onConfirm={handleDecrypt}
+      />
+
+      <ConfirmModal
+        isOpen={pendingDelete !== null}
+        title="Delete document?"
+        message={
+          <>
+            <strong>{pendingDelete?.file_name}</strong> and its encrypted blob will be permanently removed.
+            Anyone with a share link will lose access. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete permanently"
+        onConfirm={handleDelete}
+        onClose={closeDeleteModal}
       />
     </section>
   );

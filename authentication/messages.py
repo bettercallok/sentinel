@@ -28,6 +28,11 @@ def format_issued_at(issued_at):
     return utc.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 
+def format_nonce(nonce):
+    """SIWS/EIP-4361 nonces must be alphanumeric (8+ chars); a hyphenated UUID is rejected."""
+    return str(nonce).replace('-', '')
+
+
 def build_sign_in_message(wallet_address, nonce, issued_at, domain=None):
     return (
         f'{domain or settings.SIWS_DOMAIN} wants you to sign in with your Solana account:\n'
@@ -35,6 +40,6 @@ def build_sign_in_message(wallet_address, nonce, issued_at, domain=None):
         '\n'
         f'{settings.SIWS_STATEMENT}\n'
         '\n'
-        f'Nonce: {nonce}\n'
+        f'Nonce: {format_nonce(nonce)}\n'
         f'Issued At: {format_issued_at(issued_at)}'
     )

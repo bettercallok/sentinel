@@ -56,6 +56,12 @@ class AuthFlowTests(TestCase):
         domain = first_line.split(' wants you to sign in')[0]
         self.assertRegex(domain, r'^[A-Za-z0-9.-]+(:\d+)?$')
 
+    def test_nonce_is_alphanumeric(self):
+        # SIWS/EIP-4361 grammar: nonce = 8*( ALPHA / DIGIT ). Phantom rejects hyphenated UUIDs.
+        resp = self.request_nonce()
+        self.assertRegex(resp.data['nonce'], r'^[A-Za-z0-9]{8,}$')
+        self.assertIn(f"\nNonce: {resp.data['nonce']}\n", resp.data['message'])
+
     def test_issued_at_is_rfc3339_utc(self):
         msg = self.request_nonce().data['message']
         self.assertRegex(msg, r'Issued At: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$')

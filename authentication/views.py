@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from core.solana import decode_solana_address
 
 from .authentication import IsWalletAuthenticated
-from .messages import build_sign_in_message, sign_in_domain
+from .messages import build_sign_in_message, format_nonce, sign_in_domain
 from .models import WalletNonce
 from .tokens import issue_token
 
@@ -56,7 +56,7 @@ class GenerateNonceView(APIView):
 
         return Response({
             'wallet': wallet_nonce.wallet_address,
-            'nonce': str(wallet_nonce.nonce),
+            'nonce': format_nonce(wallet_nonce.nonce),
             'message': build_sign_in_message(
                 wallet_nonce.wallet_address, wallet_nonce.nonce, wallet_nonce.created_at,
                 domain=sign_in_domain(request),

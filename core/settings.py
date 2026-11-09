@@ -192,8 +192,10 @@ JWT_ISSUER = os.environ.get('JWT_ISSUER', 'sentinel-api')
 JWT_AUDIENCE = os.environ.get('JWT_AUDIENCE', 'sentinel-app')
 JWT_LIFETIME_SECONDS = int(os.environ.get('JWT_LIFETIME_SECONDS', 24 * 60 * 60))
 NONCE_TTL_SECONDS = int(os.environ.get('NONCE_TTL_SECONDS', 5 * 60))
-# Shown to the user inside the wallet's signature prompt.
-SIWS_DOMAIN = os.environ.get('SIWS_DOMAIN', 'Sentinel')
+# Host shown in the wallet's signature prompt when the request's Origin is not one of
+# CORS_ALLOWED_ORIGINS (normally the frontend's own host is used). Must be a bare host
+# such as "sentinel.vercel.app": Phantom rejects SIWS messages whose domain isn't one.
+SIWS_DOMAIN = os.environ.get('SIWS_DOMAIN', 'localhost')
 SIWS_STATEMENT = os.environ.get(
     'SIWS_STATEMENT',
     'Sign in to the Sentinel vault. This request will not trigger a blockchain transaction or cost any fees.',

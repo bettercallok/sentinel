@@ -50,6 +50,39 @@ class AuthFlowTests(TestCase):
         self.assertIn(settings.SIWS_DOMAIN, msg)
         self.assertIn('Issued At:', msg)
 
+    def test_message_domain_is_a_host_phantom_accepts(self):
+        # Phantom rejects SIWS messages whose first token isn't a host ("invalid formatting").
+        first_line = self.request_nonce().data['message'].split('\n')[0]
+        domain = first_line.split(' wants you to sign in')[0]
+        self.assertRegex(domain, r'^[A-Za-z0-9.-]+(:\d+)?$')
+
+    def test_issued_at_is_rfc3339_utc(self):
+        msg = self.request_nonce().data['message']
+        self.assertRegex(msg, r'Issued At: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$')
+
+    @mock.patch.object(settings, 'CORS_ALLOWED_ORIGINS', ['https://app.example.com'])
+    def test_trusted_origin_sets_domain_and_sign_in_works(self):
+        origin = {'HTTP_ORIGIN': 'https://app.example.com'}
+        resp = self.client.post(reverse('generate-nonce'), {'wallet_address': self.wallet}, format='json', **origin)
+        msg = resp.data['message']
+        self.assertTrue(msg.startswith('app.example.com wants you to sign in'))
+        resp = self.client.post(
+            reverse('verify-signature'),
+            {'wallet_address': self.wallet, 'signature': self.sign(msg)},
+            format='json',
+            **origin,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('token', resp.data)
+
+    @mock.patch.object(settings, 'CORS_ALLOWED_ORIGINS', ['https://app.example.com'])
+    def test_untrusted_origin_falls_back_to_configured_domain(self):
+        resp = self.client.post(
+            reverse('generate-nonce'), {'wallet_address': self.wallet}, format='json',
+            HTTP_ORIGIN='https://evil.example.net',
+        )
+        self.assertTrue(resp.data['message'].startswith(f'{settings.SIWS_DOMAIN} wants you'))
+
     def test_nonce_requires_wallet(self):
         self.assertEqual(self.client.post(reverse('generate-nonce'), {}, format='json').status_code, 400)
 

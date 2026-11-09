@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from core.solana import decode_solana_address
 
 from .authentication import IsWalletAuthenticated
-from .messages import build_sign_in_message
+from .messages import build_sign_in_message, sign_in_domain
 from .models import WalletNonce
 from .tokens import issue_token
 
@@ -58,7 +58,8 @@ class GenerateNonceView(APIView):
             'wallet': wallet_nonce.wallet_address,
             'nonce': str(wallet_nonce.nonce),
             'message': build_sign_in_message(
-                wallet_nonce.wallet_address, wallet_nonce.nonce, wallet_nonce.created_at
+                wallet_nonce.wallet_address, wallet_nonce.nonce, wallet_nonce.created_at,
+                domain=sign_in_domain(request),
             ),
         }, status=status.HTTP_200_OK)
 
@@ -97,7 +98,8 @@ class VerifySignatureView(APIView):
 
         # The message is rebuilt from server-side state, never taken from the client.
         message = build_sign_in_message(
-            wallet_nonce.wallet_address, wallet_nonce.nonce, wallet_nonce.created_at
+            wallet_nonce.wallet_address, wallet_nonce.nonce, wallet_nonce.created_at,
+            domain=sign_in_domain(request),
         ).encode('utf-8')
 
         try:
